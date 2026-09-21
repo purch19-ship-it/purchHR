@@ -204,14 +204,16 @@
   }
 
   async function poll() {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6000);   // ถ้าค้างเกิน 6 วิ ให้ยกเลิกแล้วลองใหม่
     try {
-      const res = await fetch(CONFIG.proxyUrl, { cache: 'no-store' });
+      const res = await fetch(CONFIG.proxyUrl + '?t=' + Date.now(), { cache: 'no-store', signal: ctrl.signal });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const json = await res.json();
       const hr = json?.data?.heart_rate;
       if (!Number.isFinite(hr) || hr <= 0) throw new Error('ไม่มีค่า HR');
 
-      S.connected = true; S.err = '';
+      S.connected = true; S.err = ''; S.lastPoll = performance.now();
       const m = json.measured_at ?? null;
       if (m === null || m !== S.lastMeasured) {   // ได้ค่าใหม่จริง (ไม่พึ่งนาฬิกาเครื่อง)
         S.lastMeasured = m;
@@ -221,11 +223,13 @@
         if (modeEl.value === 'reading') beep();
       }
     } catch (e) {
-      S.connected = false; S.err = e.message;
+      S.connected = false;
+      S.err = e.name === 'AbortError' ? 'หมดเวลา 6 วินาที' : e.message;
       console.error('HR error:', e);
     } finally {
+      clearTimeout(timer);
+      setTimeout(poll, CONFIG.pollMs);   // นัดรอบถัดไปก่อนเสมอ ต่อให้ render พังก็ไม่หยุดดึง
       render();
-      setTimeout(poll, CONFIG.pollMs);
     }
   }
 
@@ -236,7 +240,10 @@
     bpmEl.textContent = (S.bpm !== null && st !== 'offline') ? S.bpm : '--';
     if (st === 'live') statusEl.textContent = 'รับสัญญาณสด';
     else if (st === 'wait') statusEl.textContent = 'กำลังเชื่อมต่อ…';
-    else if (st === 'stale') statusEl.textContent = `ไม่ได้รับค่าใหม่ ${Math.round((performance.now() - S.lastChange) / 1000)} วินาที (เช็คนาฬิกา/แอป Pulsoid)`;
+    else if (st === 'stale') {
+      const now = performance.now();
+      statusEl.textContent = `ไม่ได้รับค่าใหม่ ${Math.round((now - S.lastChange) / 1000)} วินาที (เซิร์ฟเวอร์ตอบล่าสุดเมื่อ ${Math.round((now - (S.lastPoll || 0)) / 1000)} วินาทีก่อน)`;
+    }
     else statusEl.textContent = `ไม่มีสัญญาณ${S.err ? ' (' + S.err + ')' : ''}`;
 
     const vals = S.history.map(p => p.v);
