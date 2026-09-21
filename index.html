@@ -1,35 +1,384 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-    <meta charset="UTF-8">
-    <title>Purch HR Monitor</title>
-    <style>
-        body { font-family: sans-serif; text-align: center; margin-top: 50px; background: #111; color: #fff; }
-        #hr-display { font-size: 80px; font-weight: bold; color: #ff3366; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Purch HR Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #061417;
+    --panel: #081c20;
+    --line: rgba(96, 214, 168, .22);
+    --text: #e9f5ef;
+    --muted: #7fa79a;
+    --trace: #52f2a6;
+    --heart: #ff4d6a;
+    --font: "Chakra Petch", "Noto Sans Thai", "Tahoma", system-ui, sans-serif;
+  }
+  .app[data-state="stale"]   { --trace: #f0b04a; }
+  .app[data-state="offline"] { --trace: #ff6272; }
+  .app[data-state="wait"]    { --trace: #7fa79a; }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); }
+
+  .app { height: 100dvh; display: flex; flex-direction: column; padding: 14px 16px 16px; gap: 12px; }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0; letter-spacing: .02em; }
+  .status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 15px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--trace); box-shadow: 0 0 8px var(--trace); }
+  .app[data-state="live"] .dot { animation: blink 1.2s ease-in-out infinite; }
+  @keyframes blink { 50% { opacity: .35; } }
+
+  .controls { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+  .controls label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+  button, select {
+    font: inherit; font-size: 15px; color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer;
+  }
+  button[aria-pressed="true"] { background: #0f3a30; border-color: var(--trace); }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--trace); outline-offset: 2px; }
+  input[type="range"] { width: 90px; accent-color: var(--trace); }
+
+  main {
+    flex: 1; min-height: 0; display: grid; gap: 12px;
+    grid-template-columns: minmax(0, 1fr) minmax(200px, 26vw);
+    grid-template-rows: minmax(0, 3fr) minmax(170px, 1.3fr);
+  }
+  .panel { border: 1px solid var(--line); border-radius: 10px; background-color: var(--panel); position: relative; overflow: hidden; }
+
+  /* กระดาษกราฟ ECG: ช่องใหญ่ 50px ช่องเล็ก 10px */
+  .ecg {
+    grid-column: 1; grid-row: 1;
+    background-image:
+      linear-gradient(rgba(96,214,168,.17) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(96,214,168,.17) 1px, transparent 1px),
+      linear-gradient(rgba(96,214,168,.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(96,214,168,.06) 1px, transparent 1px);
+    background-size: 50px 50px, 50px 50px, 10px 10px, 10px 10px;
+  }
+  .ecg canvas, .plot canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .note { position: absolute; left: 12px; bottom: 8px; margin: 0; font-size: 12px; color: var(--muted); }
+
+  .readout { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+  #heart { width: clamp(28px, 4vw, 48px); height: auto; fill: var(--heart); transform-origin: center; }
+  #bpm {
+    font-size: clamp(76px, 13vw, 210px); font-weight: 600; line-height: 1;
+    font-variant-numeric: tabular-nums; color: var(--text);
+  }
+  .app[data-state="stale"] #bpm { color: #f0b04a; opacity: .75; }
+  .app[data-state="offline"] #bpm, .app[data-state="wait"] #bpm { color: var(--muted); }
+  .unit { font-size: 18px; color: var(--muted); }
+
+  .trend { grid-column: 1 / -1; grid-row: 2; display: flex; flex-direction: column; }
+  .trend-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 28px; padding: 10px 14px 0; }
+  .trend-head h2 { font-size: 15px; font-weight: 600; margin: 0; }
+  .stats { display: flex; gap: 22px; margin: 0; margin-left: auto; }
+  .stats div { display: flex; align-items: baseline; gap: 6px; }
+  .stats dt { color: var(--muted); font-size: 13px; }
+  .stats dd { margin: 0; font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .plot { position: relative; flex: 1; min-height: 0; }
+
+  @media (max-width: 720px) {
+    .app { height: auto; min-height: 100dvh; }
+    main { grid-template-columns: 1fr; grid-template-rows: auto; }
+    .ecg, .readout, .trend { grid-column: 1; grid-row: auto; }
+    .ecg { height: 42vh; min-height: 220px; }
+    .readout { padding: 12px 0; }
+    .trend { height: 240px; }
+    .controls { margin-left: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none !important; } }
+</style>
 </head>
 <body>
-    <h1>Heart Rate Monitor</h1>
-    <div id="hr-display">--</div>
-    <p>BPM</p>
+<div class="app" id="app" data-state="wait">
+  <header>
+    <h1>Purch HR Monitor</h1>
+    <div class="status" role="status" aria-live="polite"><span class="dot"></span><span id="statusText">กำลังเชื่อมต่อ…</span></div>
+    <div class="controls">
+      <label>เสียง
+        <select id="mode" aria-label="รูปแบบเสียงบี๊บ">
+          <option value="beat">ตามจังหวะหัวใจ</option>
+          <option value="reading">ทุกครั้งที่ได้ค่าใหม่</option>
+        </select>
+      </label>
+      <label>ดัง <input type="range" id="vol" min="0" max="1" step="0.05" value="0.5"></label>
+      <button id="soundBtn" aria-pressed="false">เปิดเสียง</button>
+    </div>
+  </header>
 
-    <script>
-        const proxyUrl = 'https://pulsoid-proxy-v2.purch19.workers.dev/';
+  <main>
+    <section class="panel ecg" id="ecgPanel">
+      <canvas id="ecg" aria-label="กราฟคลื่นหัวใจจำลอง"></canvas>
+      <p class="note">รูปคลื่นจำลองจากค่า BPM ของนาฬิกา ไม่ใช่ ECG จริง</p>
+    </section>
 
-        function updateHR() {
-            fetch(proxyUrl)
-                .then(res => res.json())
-                .then(data => {
-                    const hr = data.data.heart_rate;
-                    document.getElementById('hr-display').innerText = hr;
-                    console.log("Heart Rate:", hr);
-                })
-                .catch(err => console.error("Error fetching HR:", err));
-        }
+    <section class="panel readout">
+      <svg id="heart" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+      <div id="bpm" aria-live="off">--</div>
+      <div class="unit">BPM</div>
+    </section>
 
-        // อัปเดตทุกๆ 5 วินาที
-        setInterval(updateHR, 5000);
-        updateHR();
-    </script>
+    <section class="panel trend">
+      <div class="trend-head">
+        <h2>5 นาทีล่าสุด</h2>
+        <dl class="stats">
+          <div><dt>ต่ำสุด</dt><dd id="stMin">--</dd></div>
+          <div><dt>เฉลี่ย</dt><dd id="stAvg">--</dd></div>
+          <div><dt>สูงสุด</dt><dd id="stMax">--</dd></div>
+        </dl>
+      </div>
+      <div class="plot" id="plot"><canvas id="trend" aria-label="กราฟแนวโน้มอัตราการเต้นของหัวใจ"></canvas></div>
+    </section>
+  </main>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const CONFIG = {
+    proxyUrl: 'https://pulsoid-proxy-v2.purch19.workers.dev/',
+    pollMs: 1000,          // ถี่ทุกกี่ ms (Cloudflare ฟรี 100,000 request/วัน ถ้าเปิดหลายเครื่องให้เพิ่มค่านี้)
+    staleMs: 10000,        // ไม่มีค่าใหม่เกินนี้ = ข้อมูลเก่า
+    historyMs: 5 * 60 * 1000,
+    sweepPxPerSec: 140,    // ความเร็วเส้นกราฟ ECG
+  };
+
+  const $ = id => document.getElementById(id);
+  const app = $('app'), bpmEl = $('bpm'), statusEl = $('statusText'), heartEl = $('heart');
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const S = { bpm: null, connected: null, err: '', lastMeasured: null, lastChange: 0, history: [], sound: false };
+
+  function liveState() {
+    if (S.bpm === null) return S.connected === false ? 'offline' : 'wait';
+    if (!S.connected) return 'offline';
+    return performance.now() - S.lastChange > CONFIG.staleMs ? 'stale' : 'live';
+  }
+
+  /* ---------- เสียง ---------- */
+  let actx = null, wakeLock = null;
+  const volEl = $('vol'), modeEl = $('mode'), soundBtn = $('soundBtn');
+
+  function beep() {
+    if (!actx || !S.sound) return;
+    const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+    o.type = 'sine'; o.frequency.value = 1000;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.5 * Number(volEl.value), t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    o.connect(g).connect(actx.destination);
+    o.start(t); o.stop(t + 0.14);
+  }
+
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (_) {}
+  }
+
+  soundBtn.addEventListener('click', () => {
+    S.sound = !S.sound;
+    soundBtn.setAttribute('aria-pressed', S.sound);
+    soundBtn.textContent = S.sound ? 'ปิดเสียง' : 'เปิดเสียง';
+    if (S.sound) {           // ต้องมีการคลิกก่อน เบราว์เซอร์ถึงยอมให้เล่นเสียง
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === 'suspended') actx.resume();
+      beep();
+      keepAwake();
+    }
+  });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && S.sound) keepAwake(); });
+
+  /* ---------- ดึงข้อมูล ---------- */
+  function pushHistory(v) {
+    const now = Date.now();
+    S.history.push({ t: now, v });
+    const cut = now - CONFIG.historyMs;
+    while (S.history.length && S.history[0].t < cut) S.history.shift();
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch(CONFIG.proxyUrl, { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const json = await res.json();
+      const hr = json?.data?.heart_rate;
+      if (!Number.isFinite(hr) || hr <= 0) throw new Error('ไม่มีค่า HR');
+
+      S.connected = true; S.err = '';
+      const m = json.measured_at ?? null;
+      if (m === null || m !== S.lastMeasured) {   // ได้ค่าใหม่จริง (ไม่พึ่งนาฬิกาเครื่อง)
+        S.lastMeasured = m;
+        S.lastChange = performance.now();
+        S.bpm = hr;
+        pushHistory(hr);
+        if (modeEl.value === 'reading') beep();
+      }
+    } catch (e) {
+      S.connected = false; S.err = e.message;
+      console.error('HR error:', e);
+    } finally {
+      render();
+      setTimeout(poll, CONFIG.pollMs);
+    }
+  }
+
+  /* ---------- แสดงผลตัวเลข/สถานะ ---------- */
+  function render() {
+    const st = liveState();
+    app.dataset.state = st;
+    bpmEl.textContent = (S.bpm !== null && st !== 'offline') ? S.bpm : '--';
+    if (st === 'live') statusEl.textContent = 'รับสัญญาณสด';
+    else if (st === 'wait') statusEl.textContent = 'กำลังเชื่อมต่อ…';
+    else if (st === 'stale') statusEl.textContent = `ไม่ได้รับค่าใหม่ ${Math.round((performance.now() - S.lastChange) / 1000)} วินาที (เช็คนาฬิกา/แอป Pulsoid)`;
+    else statusEl.textContent = `ไม่มีสัญญาณ${S.err ? ' (' + S.err + ')' : ''}`;
+
+    const vals = S.history.map(p => p.v);
+    $('stMin').textContent = vals.length ? Math.min(...vals) : '--';
+    $('stMax').textContent = vals.length ? Math.max(...vals) : '--';
+    $('stAvg').textContent = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : '--';
+    drawTrend();
+  }
+  setInterval(render, 1000);
+
+  /* ---------- กราฟ ECG (sweep) ---------- */
+  const ecgC = $('ecg'), ecgX = ecgC.getContext('2d');
+  let W = 0, H = 0, x = 0, prevY = null, beatTime = 0, fired = false, clock = 0;
+  const R_PHASE = 0.28;
+  // P Q R S T เป็นก้อนระฆัง (แอมพลิจูด, ตำแหน่งในจังหวะ 0-1, ความกว้างเป็นวินาที)
+  const WAVES = [
+    { a: 0.13,  c: 0.16,  s: 0.028 },
+    { a: -0.12, c: 0.255, s: 0.009 },
+    { a: 1.0,   c: 0.28,  s: 0.011 },
+    { a: -0.25, c: 0.305, s: 0.010 },
+    { a: 0.30,  c: 0.52,  s: 0.050 },
+  ];
+  function ecg(ph, T) {
+    let v = 0;
+    for (const w of WAVES) { const d = (ph - w.c) * T; v += w.a * Math.exp(-(d * d) / (2 * w.s * w.s)); }
+    return v;
+  }
+
+  function sizeEcg() {
+    const r = ecgC.parentElement.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    W = r.width; H = r.height;
+    ecgC.width = Math.round(W * dpr); ecgC.height = Math.round(H * dpr);
+    ecgX.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ecgX.lineWidth = 2.4; ecgX.lineJoin = 'round'; ecgX.lineCap = 'round';
+    x = 0; prevY = null;
+  }
+
+  function onBeat() {
+    if (S.sound && modeEl.value === 'beat') beep();
+    if (!reduceMotion) heartEl.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: 240 });
+  }
+
+  let lastFrame = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - lastFrame) / 1000, 0.1); lastFrame = now;
+    const st = liveState(), live = st === 'live';
+    const bpm = live ? Math.min(200, Math.max(35, S.bpm)) : null;
+    const T = bpm ? 60 / bpm : 1;
+    const base = H * 0.62, amp = H * 0.42;
+    const color = getComputedStyle(app).getPropertyValue('--trace').trim() || '#52f2a6';
+
+    ecgX.strokeStyle = color; ecgX.shadowColor = color; ecgX.shadowBlur = 8;
+    if (prevY === null) prevY = base;
+    ecgX.beginPath(); ecgX.moveTo(x, prevY);
+
+    const n = Math.max(1, Math.ceil(dt / 0.004)), d = dt / n;
+    for (let i = 0; i < n; i++) {
+      clock += d;
+      x += d * CONFIG.sweepPxPerSec;
+      let v = 0;
+      if (live) {
+        beatTime += d;
+        if (beatTime >= T) { beatTime -= T; fired = false; }
+        const ph = beatTime / T;
+        if (!fired && ph >= R_PHASE) { fired = true; onBeat(); }
+        v = ecg(ph, T) + Math.sin(clock * 1.3) * 0.012;  // เส้นฐานไหวเล็กน้อยให้ดูมีชีวิต
+      }
+      const y = base - v * amp;
+      if (x >= W) { x -= W; ecgX.stroke(); ecgX.beginPath(); ecgX.moveTo(x, y); }
+      else ecgX.lineTo(x, y);
+      prevY = y;
+    }
+    ecgX.stroke();
+
+    // ลบเส้นเก่าข้างหน้าหัวกราฟ เหมือนจอมอนิเตอร์จริง
+    const gap = 34;
+    ecgX.shadowBlur = 0;
+    ecgX.clearRect(x + 1, 0, gap, H);
+    if (x + 1 + gap > W) ecgX.clearRect(0, 0, x + 1 + gap - W, H);
+
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------- กราฟแนวโน้ม 5 นาที ---------- */
+  const trC = $('trend'), trX = trC.getContext('2d');
+  let TW = 0, TH = 0;
+  function sizeTrend() {
+    const r = trC.parentElement.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    TW = r.width; TH = r.height;
+    trC.width = Math.round(TW * dpr); trC.height = Math.round(TH * dpr);
+    trX.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawTrend();
+  }
+
+  function drawTrend() {
+    if (!TW || !TH) return;
+    const c = trX;
+    c.clearRect(0, 0, TW, TH);
+    const padL = 38, padR = 12, padT = 10, padB = 22;
+    const pw = TW - padL - padR, ph = TH - padT - padB;
+    const now = Date.now(), t0 = now - CONFIG.historyMs;
+    const hist = S.history.filter(p => p.t >= t0);
+    const vals = hist.map(p => p.v);
+
+    let lo = vals.length ? Math.min(...vals) : 60, hi = vals.length ? Math.max(...vals) : 100;
+    lo = Math.floor((lo - 6) / 5) * 5; hi = Math.ceil((hi + 6) / 5) * 5;
+    if (hi - lo < 30) hi = lo + 30;
+    const X = t => padL + ((t - t0) / CONFIG.historyMs) * pw;
+    const Y = v => padT + ph * (1 - (v - lo) / (hi - lo));
+
+    c.font = '12px "Chakra Petch", sans-serif';
+    c.fillStyle = 'rgba(160,205,190,.75)';
+    c.strokeStyle = 'rgba(96,214,168,.14)'; c.lineWidth = 1;
+    c.textAlign = 'right'; c.textBaseline = 'middle';
+    for (let i = 0; i <= 3; i++) {
+      const v = lo + ((hi - lo) * i) / 3, y = Math.round(Y(v)) + .5;
+      c.beginPath(); c.moveTo(padL, y); c.lineTo(padL + pw, y); c.stroke();
+      c.fillText(Math.round(v), padL - 8, y);
+    }
+    c.textBaseline = 'alphabetic';
+    c.textAlign = 'left';  c.fillText('5 นาทีที่แล้ว', padL, TH - 5);
+    c.textAlign = 'right'; c.fillText('ตอนนี้', padL + pw, TH - 5);
+
+    if (!hist.length) return;
+    const color = getComputedStyle(app).getPropertyValue('--trace').trim() || '#52f2a6';
+    c.strokeStyle = color; c.lineWidth = 2; c.lineJoin = 'round';
+    c.beginPath();
+    hist.forEach((p, i) => {
+      const gapBreak = i === 0 || p.t - hist[i - 1].t > 6000;   // ขาดช่วงนานเกิน 6 วิ = ตัดเส้น
+      gapBreak ? c.moveTo(X(p.t), Y(p.v)) : c.lineTo(X(p.t), Y(p.v));
+    });
+    c.stroke();
+    const last = hist[hist.length - 1];
+    c.fillStyle = color; c.beginPath(); c.arc(X(last.t), Y(last.v), 3.5, 0, Math.PI * 2); c.fill();
+  }
+
+  /* ---------- เริ่มทำงาน ---------- */
+  new ResizeObserver(() => { sizeEcg(); sizeTrend(); }).observe(document.body);
+  sizeEcg(); sizeTrend();
+  requestAnimationFrame(frame);
+  poll();
+})();
+</script>
 </body>
 </html>
