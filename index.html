@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hospital Patient Monitor</title>
+    <style>
+        body { 
+            background-color: #000; 
+            color: #00ff00; 
+            font-family: monospace; 
+            margin: 0; 
+            padding: 20px; 
+            box-sizing: border-box;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            border-bottom: 2px solid #333; 
+            padding-bottom: 10px; 
+        }
+        .header h2 {
+            margin: 0;
+            font-size: 1.8rem;
+            color: #00ff00;
+        }
+        .container { 
+            display: flex; 
+            flex: 1; 
+            margin-top: 15px; 
+            gap: 15px;
+        }
+        .chart-box { 
+            flex: 2; 
+            background: #050505; 
+            border: 2px solid #222; 
+            border-radius: 8px;
+            position: relative; 
+        }
+        canvas { 
+            width: 100%; 
+            height: 100%; 
+            display: block;
+        }
+        .vitals-box { 
+            flex: 1; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: center; 
+        }
+        .card { 
+            background: #0a0a0a; 
+            padding: 10px; 
+            border-radius: 12px; 
+            border: 2px solid #00ff00; 
+            box-shadow: 0 0 15px rgba(0, 255, 0, 0.15);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 80%;
+            overflow: hidden;
+            position: relative;
+        }
+        .card-title {
+            font-size: 1.8rem;
+            font-weight: bold;
+            padding: 10px;
+        }
+        .pulsoid-frame {
+            width: 100%;
+            height: 100%;
+            border: none;
+            flex: 1;
+        }
+        button { 
+            background: #222; 
+            color: #fff; 
+            border: 1px solid #555; 
+            padding: 10px 20px; 
+            border-radius: 5px; 
+            font-size: 1rem; 
+            cursor: pointer; 
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h2>BED 01 - PATIENT MONITOR</h2>
+        <button id="soundBtn" onclick="toggleSound()">🔊 เปิดเสียงปี๊บ (Enable Sound)</button>
+    </div>
+
+    <div class="container">
+        <div class="chart-box">
+            <canvas id="ecgCanvas"></canvas>
+        </div>
+        <div class="vitals-box">
+            <div class="card hr">
+                <div class="card-title">❤️ HR (Pulse)</div>
+                <!-- ดึง Widget ของ Pulsoid มาฝากโดยตรง -->
+                <iframe class="pulsoid-frame" src="https://pulsoid.net/widget/view/015ef2b6-c115-4db9-9907-46d61bee2f52"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // *** 1. ระบบเสียง Beep อัตโนมัติ ***
+        let audioCtx = null;
+        let soundEnabled = false;
+
+        function toggleSound() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            soundEnabled = !soundEnabled;
+            document.getElementById('soundBtn').innerText = soundEnabled ? '🔊 เสียงปี๊บ: เปิด' : '🔇 เสียงปี๊บ: ปิด';
+            document.getElementById('soundBtn').style.background = soundEnabled ? '#008800' : '#222';
+        }
+
+        function playBeep() {
+            if (!soundEnabled || !audioCtx) return;
+            let osc = audioCtx.createOscillator();
+            let gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.08);
+        }
+
+        // *** 2. ระบบวาดกราฟ ECG Sweep ***
+        const canvas = document.getElementById('ecgCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+        let x = 0, lastY = canvas.height / 2;
+
+        function drawECG() {
+            const centerY = canvas.height / 2;
+            let y = centerY + (Math.sin(x * 0.05) * 5) + (Math.random() * 4 - 2);
+
+            // จำลองจังหวะการเต้นของกราฟ ECG ให้สัมพันธ์กับเวลา
+            if (Math.floor(x) % 120 === 0) {
+                y = centerY - 70;
+                playBeep(); // ส่งเสียงปี๊บตามจังหวะ
+            }
+
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(x, lastY);
+            ctx.lineTo(x + 2, y);
+            ctx.stroke();
+            ctx.clearRect(x + 3, 0, 12, canvas.height);
+            lastY = y;
+            x += 2;
+            if (x > canvas.width) x = 0;
+            requestAnimationFrame(drawECG);
+        }
+        drawECG();
+    </script>
+</body>
+</html>
