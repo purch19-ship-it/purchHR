@@ -30,11 +30,6 @@
             color: #00ff00;
             letter-spacing: 2px;
         }
-        .status-tag {
-            font-size: 0.9rem;
-            color: #888;
-            margin-left: 10px;
-        }
         .container { 
             display: flex; 
             flex: 1; 
@@ -61,7 +56,7 @@
         }
         .card { 
             background: #080808; 
-            padding: 25px; 
+            padding: 15px; 
             border-radius: 12px; 
             border: 2px solid #00ff00; 
             box-shadow: 0 0 15px rgba(0, 255, 0, 0.15);
@@ -69,24 +64,18 @@
             flex-direction: column;
             justify-content: space-between;
             height: 80%;
+            overflow: hidden;
         }
         .card-title {
             font-size: 1.8rem;
             font-weight: bold;
         }
-        .val { 
-            font-size: 7.5rem; 
-            font-weight: bold; 
-            text-align: right; 
-            line-height: 1;
-            margin: 20px 0;
-            text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
-            color: #00ff00;
-        }
-        .unit { 
-            text-align: right; 
-            font-size: 1.8rem; 
-            color: #00cc00;
+        .pulsoid-frame {
+            width: 100%;
+            height: 100%;
+            border: none;
+            flex: 1;
+            background: transparent;
         }
         button { 
             background: #111; 
@@ -96,24 +85,16 @@
             border-radius: 5px; 
             font-size: 1rem; 
             cursor: pointer; 
-            transition: 0.2s;
         }
         button:hover {
             border-color: #00ff00;
-        }
-        .heart-icon {
-            display: inline-block;
-            transition: transform 0.1s;
-        }
-        .pulse {
-            transform: scale(1.3);
         }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <h2>Purcg C. <span class="status-tag" id="syncStatus">● REALTIME SYNC</span></h2>
+        <h2>Purch C. - PATIENT MONITOR</h2>
         <button id="soundBtn" onclick="toggleSound()">🔊 เปิดเสียงปี๊บ (Enable Sound)</button>
     </div>
 
@@ -123,21 +104,18 @@
         </div>
         <div class="vitals-box">
             <div class="card hr">
-                <div class="card-title"><span id="heart" class="heart-icon">❤️</span> HR (Pulse)</div>
-                <div class="val" id="hrValue">--</div>
-                <div class="unit">BPM</div>
+                <div class="card-title">❤️ HR (Pulse)</div>
+                <iframe id="pulsoidFrame" class="pulsoid-frame" src="https://pulsoid.net/widget/view/0f9acd52-7d11-4156-8b62-ce37b11067bb" allow="autoplay"></iframe>
             </div>
         </div>
     </div>
 
     <script>
         const WIDGET_ID = "0f9acd52-7d11-4156-8b62-ce37b11067bb";
-        
-        let currentBPM = 75; // ค่าเริ่มต้น
+        let currentBPM = 75;
         let audioCtx = null;
         let soundEnabled = false;
 
-        // *** 1. ระบบเสียง Beep ***
         function toggleSound() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             soundEnabled = !soundEnabled;
@@ -161,7 +139,6 @@
             } catch (e) {}
         }
 
-        // *** 2. ระบบวาดกราฟ ECG ที่ผันแปรตาม BPM จริง ***
         const canvas = document.getElementById('ecgCanvas');
         const ctx = canvas.getContext('2d');
         
@@ -179,24 +156,13 @@
         function drawECG() {
             const centerY = canvas.height / 2;
             const now = Date.now();
-            
-            // คำนวณช่วงห่างระหว่างการเต้นแต่ละครั้ง (มิลลิวินาที) ตามค่า BPM จริง
             const beatInterval = (60 / currentBPM) * 1000; 
             
             let y = centerY + (Math.sin(x * 0.08) * 3) + (Math.random() * 3 - 1.5);
 
-            // เมื่อครบรอบการเต้นตาม BPM จริง
             if (now - lastBeatTime >= beatInterval) {
-                y = centerY - (canvas.height * 0.35); // วาดจุดพีค QRS Complex
-                playBeep(); // ส่งเสียงปี๊บ
-                
-                // เอฟเฟกต์หัวใจเต้น
-                const heart = document.getElementById('heart');
-                if (heart) {
-                    heart.classList.add('pulse');
-                    setTimeout(() => heart.classList.remove('pulse'), 150);
-                }
-
+                y = centerY - (canvas.height * 0.35);
+                playBeep();
                 lastBeatTime = now;
             }
 
@@ -207,7 +173,6 @@
             ctx.lineTo(x + 2, y);
             ctx.stroke();
 
-            // ลบเส้นเก่าด้านหน้าเพื่อทำเอฟเฟกต์ Radar Sweep
             ctx.clearRect(x + 3, 0, 15, canvas.height);
 
             lastY = y;
@@ -218,45 +183,16 @@
         }
         drawECG();
 
-        // *** 3. ดึงค่า BPM จริงจาก Pulsoid API โดยตรง ***
-        async function fetchPulsoidData() {
+        async function fetchBPM() {
             try {
-                // ดึงตรงผ่าน Pulsoid API (รันบน GitHub Pages HTTPS จะไม่ติด CORS)
                 const res = await fetch(`https://ramen.pulsoid.net/v1/live/${WIDGET_ID}`);
                 if (res.ok) {
                     const data = await res.json();
-                    if (data && data.bpm) {
-                        currentBPM = data.bpm;
-                        document.getElementById('hrValue').innerText = data.bpm;
-                        document.getElementById('syncStatus').innerText = '● LIVE SYNC';
-                        document.getElementById('syncStatus').style.color = '#00ff00';
-                        return;
-                    }
+                    if (data && data.bpm) currentBPM = data.bpm;
                 }
-            } catch (e) {
-                console.log("Direct API fetch failed, trying proxy...", e);
-            }
-
-            // Proxy สำรองกรณีเบราว์เซอร์บล็อก
-            try {
-                const proxyRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://ramen.pulsoid.net/v1/live/' + WIDGET_ID)}`);
-                const proxyJson = await proxyRes.json();
-                const data = JSON.parse(proxyJson.contents);
-                if (data && data.bpm) {
-                    currentBPM = data.bpm;
-                    document.getElementById('hrValue').innerText = data.bpm;
-                    document.getElementById('syncStatus').innerText = '● LIVE (PROXY)';
-                    document.getElementById('syncStatus').style.color = '#00ff00';
-                }
-            } catch (err) {
-                document.getElementById('syncStatus').innerText = '● OFFLINE';
-                document.getElementById('syncStatus').style.color = '#ff3333';
-            }
+            } catch (e) {}
         }
-
-        // เช็กค่า BPM ใหม่ทุกๆ 1 วินาที
-        setInterval(fetchPulsoidData, 1000);
-        fetchPulsoidData();
+        setInterval(fetchBPM, 2000);
     </script>
 </body>
 </html>
