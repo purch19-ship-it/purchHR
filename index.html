@@ -1,240 +1,292 @@
-<script>
-    const WIDGET_ID = "0f9acd52-7d11-4156-8b62-ce37b11067bb";
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hospital Patient Monitor</title>
+    <style>
+        body { 
+            background-color: #000; color: #00ff00; font-family: monospace; 
+            margin: 0; padding: 20px; box-sizing: border-box; height: 100vh;
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #222; padding-bottom: 10px; }
+        .header h2 { margin: 0; font-size: 1.8rem; color: #00ff00; letter-spacing: 2px; }
+        .status-tag { font-size: 0.9rem; margin-left: 10px; transition: color 0.3s; }
+        .container { display: flex; flex: 1; margin-top: 15px; gap: 15px; }
+        .chart-box { flex: 2.2; background: #030303; border: 2px solid #1a1a1a; border-radius: 8px; position: relative; }
+        canvas { width: 100%; height: 100%; display: block; }
+        .vitals-box { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+        .card { background: #080808; padding: 15px; border-radius: 12px; border: 2px solid #00ff00; box-shadow: 0 0 15px rgba(0,255,0,0.15);
+            display: flex; flex-direction: column; justify-content: space-between; height: 80%; overflow: hidden; position: relative;
+            transition: border-color 0.3s, box-shadow 0.3s; }
+        .card.offline { border-color: #444; box-shadow: none; }
+        .card-title { font-size: 1.8rem; font-weight: bold; }
+        .pulsoid-frame { width: 100%; height: 100%; border: none; flex: 1; background: transparent; display: block; }
+        .pulsoid-frame.hidden { display: none; }
+        .val-offline { font-size: 7.5rem; font-weight: bold; text-align: right; line-height: 1; margin: 20px 0; color: #444; display: none; }
+        .val-offline.show { display: block; }
+        .unit { text-align: right; font-size: 1.8rem; color: #00cc00; }
+        button { background: #111; color: #fff; border: 1px solid #444; padding: 10px 20px; border-radius: 5px; font-size: 1rem; cursor: pointer; }
+        button:hover { border-color: #00ff00; }
+        .heart-icon { display: inline-block; transition: transform 0.1s; }
+        .pulse { transform: scale(1.3); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>Purch C. - PATIENT MONITOR <span class="status-tag" id="syncStatus">● CONNECTING...</span></h2>
+        <button id="soundBtn" onclick="toggleSound()">🔊 เปิดเสียงปี๊บ (Enable Sound)</button>
+    </div>
 
-    let currentBPM = 72;
-    let connState = 'connecting'; // 'live' | 'unstable' | 'disconnected' | 'connecting'
+    <div class="container">
+        <div class="chart-box">
+            <canvas id="ecgCanvas"></canvas>
+        </div>
+        <div class="vitals-box">
+            <div class="card hr" id="hrCard">
+                <div class="card-title"><span id="heart" class="heart-icon">❤️</span> HR (Pulse)</div>
+                <iframe id="pulsoidFrame" class="pulsoid-frame hidden" src="https://pulsoid.net/widget/view/0f9acd52-7d11-4156-8b62-ce37b11067bb" allow="autoplay"></iframe>
+                <div class="val-offline" id="offlineVal">--</div>
+                <div class="unit">BPM</div>
+            </div>
+        </div>
+    </div>
 
-    let lastBPMValue = null;
-    let lastValueChangeTime = Date.now();   // ใช้เช็คค่าค้าง (ถอดนาฬิกาจริง)
-    let lastFetchSuccessTime = 0;           // ใช้เช็คว่า proxy/network ใช้งานได้อยู่ไหม
+    <script>
+        const WIDGET_ID = "0f9acd52-7d11-4156-8b62-ce37b11067bb";
 
-    const STALE_VALUE_TIMEOUT_MS = 12000;   // ค่าตัวเลขค้างเดิมเกิน 12 วิ = ถือว่าถอดนาฬิกาจริง
-    const FETCH_FAIL_TIMEOUT_MS  = 10000;   // ดึงข้อมูลไม่ได้เลยเกิน 10 วิ = proxy มีปัญหา (ไม่รู้สถานะจริง)
-    const PER_REQUEST_TIMEOUT_MS = 4000;    // timeout ต่อ 1 วิธีดึงข้อมูล
+        let currentBPM = 72;
+        let connState = 'connecting';
 
-    let pollInterval = 2000;                // เริ่มที่ 2 วิ แล้วปรับเองอัตโนมัติ
-    const POLL_MIN_MS = 2000;
-    const POLL_MAX_MS = 8000;
-    let consecutiveFailCycles = 0;
+        let lastBPMValue = null;
+        let lastValueChangeTime = Date.now();
+        let lastFetchSuccessTime = 0;
 
-    let audioCtx = null;
-    let soundEnabled = false;
+        const STALE_VALUE_TIMEOUT_MS = 12000;
+        const FETCH_FAIL_TIMEOUT_MS  = 10000;
+        const PER_REQUEST_TIMEOUT_MS = 4000;
 
-    function toggleSound() {
-        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        soundEnabled = !soundEnabled;
-        const btn = document.getElementById('soundBtn');
-        btn.innerText = soundEnabled ? '🔊 เสียงปี๊บ: เปิด' : '🔇 เสียงปี๊บ: ปิด';
-        btn.style.background = soundEnabled ? '#006600' : '#111';
-    }
+        let pollInterval = 2000;
+        const POLL_MIN_MS = 2000;
+        const POLL_MAX_MS = 8000;
+        let consecutiveFailCycles = 0;
 
-    function playBeep() {
-        if (!soundEnabled || !audioCtx || connState !== 'live') return;
-        try {
-            let osc = audioCtx.createOscillator();
-            let gain = audioCtx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-            gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.07);
-        } catch (e) {}
-    }
+        let audioCtx = null;
+        let soundEnabled = false;
 
-    const canvas = document.getElementById('ecgCanvas');
-    const ctx = canvas.getContext('2d');
-
-    function resizeCanvas() {
-        canvas.width = canvas.offsetWidth;
-        canvas.height = canvas.offsetHeight;
-    }
-    resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
-
-    let x = 0;
-    let lastY = null;
-    let lastBeatTime = Date.now();
-
-    function ecgShape(phase) {
-        if (phase < 0.08)  return -0.10 * Math.sin((phase / 0.08) * Math.PI);
-        if (phase < 0.15)  return 0;
-        if (phase < 0.19)  return 0.12 * ((phase - 0.15) / 0.04);
-        if (phase < 0.23)  return 1.0 - 1.9 * ((phase - 0.19) / 0.04);
-        if (phase < 0.27)  return -0.9 + 0.95 * ((phase - 0.23) / 0.04);
-        if (phase < 0.4)   return 0.05 * Math.sin(((phase - 0.27) / 0.13) * Math.PI);
-        if (phase < 0.55)  return -0.18 * Math.sin(((phase - 0.4) / 0.15) * Math.PI);
-        return 0;
-    }
-
-    function drawECG() {
-        const centerY = canvas.height / 2;
-        const amp = canvas.height * 0.38;
-        const now = Date.now();
-        let yOffset = 0;
-        let lineColor = '#444444';
-
-        if (connState === 'live') {
-            lineColor = '#00ff00';
-            yOffset = (Math.random() * 1.2 - 0.6);
-            const beatInterval = (60 / currentBPM) * 1000;
-            let elapsed = now - lastBeatTime;
-            if (elapsed >= beatInterval) {
-                lastBeatTime = now;
-                elapsed = 0;
-                playBeep();
-                const heart = document.getElementById('heart');
-                if (heart) {
-                    heart.classList.add('pulse');
-                    setTimeout(() => heart.classList.remove('pulse'), 150);
-                }
-            }
-            const phase = Math.min(elapsed / beatInterval, 0.99);
-            yOffset += ecgShape(phase) * amp;
-        } else if (connState === 'unstable') {
-            lineColor = '#cc8800'; // เหลือง/ส้ม = ไม่แน่ใจสถานะ (proxy มีปัญหา ไม่ใช่ผู้ป่วยถอดนาฬิกา)
-            yOffset = Math.sin(x * 0.05) * 1.5;
-        } else {
-            lineColor = '#444444'; // เส้นตรงราบ = disconnected จริง
-            yOffset = 0;
+        function toggleSound() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            soundEnabled = !soundEnabled;
+            const btn = document.getElementById('soundBtn');
+            btn.innerText = soundEnabled ? '🔊 เสียงปี๊บ: เปิด' : '🔇 เสียงปี๊บ: ปิด';
+            btn.style.background = soundEnabled ? '#006600' : '#111';
         }
 
-        const y = centerY + yOffset;
-        const drawFromY = lastY === null ? centerY : lastY;
-
-        ctx.strokeStyle = lineColor;
-        ctx.lineWidth = 2.2;
-        ctx.beginPath();
-        ctx.moveTo(x, drawFromY);
-        ctx.lineTo(x + 2, y);
-        ctx.stroke();
-
-        ctx.clearRect(x + 3, 0, 14, canvas.height);
-
-        lastY = y;
-        x += 2.4;
-        if (x > canvas.width) { x = 0; lastY = null; }
-
-        requestAnimationFrame(drawECG);
-    }
-    drawECG();
-
-    // ---------- ดึงข้อมูลแบบขนาน (Parallel Race) พร้อม Timeout ต่อวิธี ----------
-    function fetchWithTimeout(url, ms, parseFn) {
-        return new Promise(async (resolve, reject) => {
-            const controller = new AbortController();
-            const timer = setTimeout(() => { controller.abort(); reject(new Error('timeout')); }, ms);
+        function playBeep() {
+            if (!soundEnabled || !audioCtx || connState !== 'live') return;
             try {
-                const res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
-                clearTimeout(timer);
-                if (!res.ok) return reject(new Error('bad status'));
-                const bpm = await parseFn(res);
-                if (typeof bpm === 'number' && bpm > 0) resolve(bpm);
-                else reject(new Error('no bpm'));
+                let osc = audioCtx.createOscillator();
+                let gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.07);
+            } catch (e) {}
+        }
+
+        const canvas = document.getElementById('ecgCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        let x = 0;
+        let lastY = null;
+        let lastBeatTime = Date.now();
+
+        function ecgShape(phase) {
+            if (phase < 0.08)  return -0.10 * Math.sin((phase / 0.08) * Math.PI);
+            if (phase < 0.15)  return 0;
+            if (phase < 0.19)  return 0.12 * ((phase - 0.15) / 0.04);
+            if (phase < 0.23)  return 1.0 - 1.9 * ((phase - 0.19) / 0.04);
+            if (phase < 0.27)  return -0.9 + 0.95 * ((phase - 0.23) / 0.04);
+            if (phase < 0.4)   return 0.05 * Math.sin(((phase - 0.27) / 0.13) * Math.PI);
+            if (phase < 0.55)  return -0.18 * Math.sin(((phase - 0.4) / 0.15) * Math.PI);
+            return 0;
+        }
+
+        function drawECG() {
+            const centerY = canvas.height / 2;
+            const amp = canvas.height * 0.38;
+            const now = Date.now();
+            let yOffset = 0;
+            let lineColor = '#444444';
+
+            if (connState === 'live') {
+                lineColor = '#00ff00';
+                yOffset = (Math.random() * 1.2 - 0.6);
+                const beatInterval = (60 / currentBPM) * 1000;
+                let elapsed = now - lastBeatTime;
+                if (elapsed >= beatInterval) {
+                    lastBeatTime = now;
+                    elapsed = 0;
+                    playBeep();
+                    const heart = document.getElementById('heart');
+                    if (heart) {
+                        heart.classList.add('pulse');
+                        setTimeout(() => heart.classList.remove('pulse'), 150);
+                    }
+                }
+                const phase = Math.min(elapsed / beatInterval, 0.99);
+                yOffset += ecgShape(phase) * amp;
+            } else if (connState === 'unstable') {
+                lineColor = '#cc8800';
+                yOffset = Math.sin(x * 0.05) * 1.5;
+            } else {
+                lineColor = '#444444';
+                yOffset = 0;
+            }
+
+            const y = centerY + yOffset;
+            const drawFromY = lastY === null ? centerY : lastY;
+
+            ctx.strokeStyle = lineColor;
+            ctx.lineWidth = 2.2;
+            ctx.beginPath();
+            ctx.moveTo(x, drawFromY);
+            ctx.lineTo(x + 2, y);
+            ctx.stroke();
+
+            ctx.clearRect(x + 3, 0, 14, canvas.height);
+
+            lastY = y;
+            x += 2.4;
+            if (x > canvas.width) { x = 0; lastY = null; }
+
+            requestAnimationFrame(drawECG);
+        }
+        drawECG();
+
+        function fetchWithTimeout(url, ms, parseFn) {
+            return new Promise(async (resolve, reject) => {
+                const controller = new AbortController();
+                const timer = setTimeout(() => { controller.abort(); reject(new Error('timeout')); }, ms);
+                try {
+                    const res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
+                    clearTimeout(timer);
+                    if (!res.ok) return reject(new Error('bad status'));
+                    const bpm = await parseFn(res);
+                    if (typeof bpm === 'number' && bpm > 0) resolve(bpm);
+                    else reject(new Error('no bpm'));
+                } catch (e) {
+                    clearTimeout(timer);
+                    reject(e);
+                }
+            });
+        }
+
+        function attemptDirect() {
+            return fetchWithTimeout(
+                `https://ramen.pulsoid.net/v1/live/${WIDGET_ID}`,
+                PER_REQUEST_TIMEOUT_MS,
+                async (res) => (await res.json())?.bpm
+            );
+        }
+
+        function attemptCorsProxy() {
+            return fetchWithTimeout(
+                `https://corsproxy.io/?${encodeURIComponent('https://ramen.pulsoid.net/v1/live/' + WIDGET_ID)}`,
+                PER_REQUEST_TIMEOUT_MS,
+                async (res) => (await res.json())?.bpm
+            );
+        }
+
+        function attemptAllOrigins() {
+            return fetchWithTimeout(
+                `https://api.allorigins.win/get?url=${encodeURIComponent('https://ramen.pulsoid.net/v1/live/' + WIDGET_ID)}`,
+                PER_REQUEST_TIMEOUT_MS,
+                async (res) => {
+                    const proxyData = await res.json();
+                    const data = JSON.parse(proxyData.contents);
+                    return data?.bpm;
+                }
+            );
+        }
+
+        async function fetchBPM() {
+            let bpm = null;
+            try {
+                bpm = await Promise.any([attemptDirect(), attemptCorsProxy(), attemptAllOrigins()]);
             } catch (e) {
-                clearTimeout(timer);
-                reject(e);
+                bpm = null;
             }
-        });
-    }
 
-    function attemptDirect() {
-        return fetchWithTimeout(
-            `https://ramen.pulsoid.net/v1/live/${WIDGET_ID}`,
-            PER_REQUEST_TIMEOUT_MS,
-            async (res) => (await res.json())?.bpm
-        );
-    }
+            const now = Date.now();
 
-    function attemptCorsProxy() {
-        return fetchWithTimeout(
-            `https://corsproxy.io/?${encodeURIComponent('https://ramen.pulsoid.net/v1/live/' + WIDGET_ID)}`,
-            PER_REQUEST_TIMEOUT_MS,
-            async (res) => (await res.json())?.bpm
-        );
-    }
-
-    function attemptAllOrigins() {
-        return fetchWithTimeout(
-            `https://api.allorigins.win/get?url=${encodeURIComponent('https://ramen.pulsoid.net/v1/live/' + WIDGET_ID)}`,
-            PER_REQUEST_TIMEOUT_MS,
-            async (res) => {
-                const proxyData = await res.json();
-                const data = JSON.parse(proxyData.contents);
-                return data?.bpm;
+            if (bpm !== null) {
+                lastFetchSuccessTime = now;
+                if (bpm !== lastBPMValue) {
+                    lastBPMValue = bpm;
+                    lastValueChangeTime = now;
+                }
+                currentBPM = bpm;
             }
-        );
-    }
 
-    async function fetchBPM() {
-        let bpm = null;
-        try {
-            // ยิงพร้อมกันทั้ง 3 วิธี เอาอันที่สำเร็จก่อนเป็นตัวชนะ
-            bpm = await Promise.any([attemptDirect(), attemptCorsProxy(), attemptAllOrigins()]);
-        } catch (e) {
-            bpm = null; // ทุกวิธีล้มเหลวหมด
+            const fetchFailedTooLong = (now - lastFetchSuccessTime) > FETCH_FAIL_TIMEOUT_MS;
+            const valueStaleTooLong  = (now - lastValueChangeTime) > STALE_VALUE_TIMEOUT_MS;
+
+            if (bpm !== null && !valueStaleTooLong) {
+                setLive(bpm);
+                consecutiveFailCycles = 0;
+                pollInterval = POLL_MIN_MS;
+            } else if (valueStaleTooLong) {
+                setDisconnected();
+            } else if (fetchFailedTooLong) {
+                setUnstable();
+                consecutiveFailCycles++;
+                pollInterval = Math.min(POLL_MAX_MS, POLL_MIN_MS * Math.pow(2, consecutiveFailCycles));
+            }
+
+            setTimeout(fetchBPM, pollInterval);
         }
 
-        const now = Date.now();
-
-        if (bpm !== null) {
-            lastFetchSuccessTime = now;
-            if (bpm !== lastBPMValue) {
-                lastBPMValue = bpm;
-                lastValueChangeTime = now;
-            }
+        function setLive(bpm) {
+            connState = 'live';
             currentBPM = bpm;
+            document.getElementById('pulsoidFrame').classList.add('hidden');
+            document.getElementById('offlineVal').classList.remove('show');
+            document.getElementById('hrCard').classList.remove('offline');
+            document.getElementById('syncStatus').innerText = '● LIVE SYNC';
+            document.getElementById('syncStatus').style.color = '#00ff00';
         }
 
-        const fetchFailedTooLong = (now - lastFetchSuccessTime) > FETCH_FAIL_TIMEOUT_MS;
-        const valueStaleTooLong  = (now - lastValueChangeTime) > STALE_VALUE_TIMEOUT_MS;
-
-        if (bpm !== null && !valueStaleTooLong) {
-            setLive(bpm);
-            consecutiveFailCycles = 0;
-            pollInterval = POLL_MIN_MS; // เชื่อมได้แล้ว กลับไปถี่ปกติ
-        } else if (valueStaleTooLong) {
-            // มั่นใจว่าค่าค้างจริง (ไม่ใช่ proxy พัง เพราะยังพอดึงได้แต่ค่าไม่ขยับ) = ถอดนาฬิกาจริง
-            setDisconnected();
-        } else if (fetchFailedTooLong) {
-            // ดึงข้อมูลไม่ได้เลยต่อเนื่อง = ไม่รู้สถานะจริง ให้โชว์ iframe สำรอง
-            setUnstable();
-            consecutiveFailCycles++;
-            pollInterval = Math.min(POLL_MAX_MS, POLL_MIN_MS * Math.pow(2, consecutiveFailCycles));
+        function setUnstable() {
+            connState = 'unstable';
+            document.getElementById('pulsoidFrame').classList.remove('hidden');
+            document.getElementById('offlineVal').classList.remove('show');
+            document.getElementById('hrCard').classList.remove('offline');
+            document.getElementById('syncStatus').innerText = '● CONNECTION UNSTABLE (เช็ค iframe ด้วยตา)';
+            document.getElementById('syncStatus').style.color = '#ffaa00';
         }
 
-        setTimeout(fetchBPM, pollInterval);
-    }
+        function setDisconnected() {
+            connState = 'disconnected';
+            document.getElementById('pulsoidFrame').classList.add('hidden');
+            document.getElementById('offlineVal').classList.add('show');
+            document.getElementById('hrCard').classList.add('offline');
+            document.getElementById('syncStatus').innerText = '● DISCONNECTED';
+            document.getElementById('syncStatus').style.color = '#ff3333';
+        }
 
-    function setLive(bpm) {
-        connState = 'live';
-        currentBPM = bpm;
-        document.getElementById('pulsoidFrame').classList.add('hidden');
-        document.getElementById('offlineVal').classList.remove('show');
-        document.getElementById('hrCard').classList.remove('offline');
-        document.getElementById('syncStatus').innerText = '● LIVE SYNC';
-        document.getElementById('syncStatus').style.color = '#00ff00';
-    }
-
-    function setUnstable() {
-        connState = 'unstable';
-        // สลับมาโชว์ iframe ของจริงเป็น fallback ให้เจ้าหน้าที่ดูตัวเลขได้ด้วยตา
-        document.getElementById('pulsoidFrame').classList.remove('hidden');
-        document.getElementById('offlineVal').classList.remove('show');
-        document.getElementById('hrCard').classList.remove('offline');
-        document.getElementById('syncStatus').innerText = '● CONNECTION UNSTABLE (เช็ค iframe ด้วยตา)';
-        document.getElementById('syncStatus').style.color = '#ffaa00';
-    }
-
-    function setDisconnected() {
-        connState = 'disconnected';
-        document.getElementById('pulsoidFrame').classList.add('hidden');
-        document.getElementById('offlineVal').classList.add('show');
-        document.getElementById('hrCard').classList.add('offline');
-        document.getElementById('syncStatus').innerText = '● DISCONNECTED';
-        document.getElementById('syncStatus').style.color = '#ff3333';
-    }
-
-    fetchBPM();
-</script>
+        fetchBPM();
+    </script>
+</body>
+</html>
