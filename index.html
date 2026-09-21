@@ -15,18 +15,25 @@
             height: 100vh;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
         .header { 
             display: flex; 
             justify-content: space-between; 
             align-items: center; 
-            border-bottom: 2px solid #333; 
+            border-bottom: 2px solid #222; 
             padding-bottom: 10px; 
         }
         .header h2 {
             margin: 0;
             font-size: 1.8rem;
             color: #00ff00;
+            letter-spacing: 2px;
+        }
+        .status-tag {
+            font-size: 0.9rem;
+            color: #888;
+            margin-left: 10px;
         }
         .container { 
             display: flex; 
@@ -35,9 +42,9 @@
             gap: 15px;
         }
         .chart-box { 
-            flex: 2; 
-            background: #050505; 
-            border: 2px solid #222; 
+            flex: 2.2; 
+            background: #030303; 
+            border: 2px solid #1a1a1a; 
             border-radius: 8px;
             position: relative; 
         }
@@ -53,8 +60,8 @@
             justify-content: center; 
         }
         .card { 
-            background: #0a0a0a; 
-            padding: 10px; 
+            background: #080808; 
+            padding: 25px; 
             border-radius: 12px; 
             border: 2px solid #00ff00; 
             box-shadow: 0 0 15px rgba(0, 255, 0, 0.15);
@@ -62,35 +69,51 @@
             flex-direction: column;
             justify-content: space-between;
             height: 80%;
-            overflow: hidden;
-            position: relative;
         }
         .card-title {
             font-size: 1.8rem;
             font-weight: bold;
-            padding: 10px;
         }
-        .pulsoid-frame {
-            width: 100%;
-            height: 100%;
-            border: none;
-            flex: 1;
+        .val { 
+            font-size: 7.5rem; 
+            font-weight: bold; 
+            text-align: right; 
+            line-height: 1;
+            margin: 20px 0;
+            text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+            color: #00ff00;
+        }
+        .unit { 
+            text-align: right; 
+            font-size: 1.8rem; 
+            color: #00cc00;
         }
         button { 
-            background: #222; 
+            background: #111; 
             color: #fff; 
-            border: 1px solid #555; 
+            border: 1px solid #444; 
             padding: 10px 20px; 
             border-radius: 5px; 
             font-size: 1rem; 
             cursor: pointer; 
+            transition: 0.2s;
+        }
+        button:hover {
+            border-color: #00ff00;
+        }
+        .heart-icon {
+            display: inline-block;
+            transition: transform 0.1s;
+        }
+        .pulse {
+            transform: scale(1.3);
         }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <h2>Purch C.</h2>
+        <h2>Purcg C. <span class="status-tag" id="syncStatus">● REALTIME SYNC</span></h2>
         <button id="soundBtn" onclick="toggleSound()">🔊 เปิดเสียงปี๊บ (Enable Sound)</button>
     </div>
 
@@ -100,53 +123,81 @@
         </div>
         <div class="vitals-box">
             <div class="card hr">
-                <div class="card-title">❤️ HR (Pulse)</div>
-                <!-- ดึง Widget ของ Pulsoid มาฝากโดยตรง -->
-                <iframe class="pulsoid-frame" src="https://pulsoid.net/widget/view/015ef2b6-c115-4db9-9907-46d61bee2f52"></iframe>
+                <div class="card-title"><span id="heart" class="heart-icon">❤️</span> HR (Pulse)</div>
+                <div class="val" id="hrValue">--</div>
+                <div class="unit">BPM</div>
             </div>
         </div>
     </div>
 
     <script>
-        // *** 1. ระบบเสียง Beep อัตโนมัติ ***
+        const WIDGET_ID = "0f9acd52-7d11-4156-8b62-ce37b11067bb";
+        
+        let currentBPM = 75; // ค่าเริ่มต้น
         let audioCtx = null;
         let soundEnabled = false;
 
+        // *** 1. ระบบเสียง Beep ***
         function toggleSound() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             soundEnabled = !soundEnabled;
-            document.getElementById('soundBtn').innerText = soundEnabled ? '🔊 เสียงปี๊บ: เปิด' : '🔇 เสียงปี๊บ: ปิด';
-            document.getElementById('soundBtn').style.background = soundEnabled ? '#008800' : '#222';
+            const btn = document.getElementById('soundBtn');
+            btn.innerText = soundEnabled ? '🔊 เสียงปี๊บ: เปิด' : '🔇 เสียงปี๊บ: ปิด';
+            btn.style.background = soundEnabled ? '#006600' : '#111';
         }
 
         function playBeep() {
             if (!soundEnabled || !audioCtx) return;
-            let osc = audioCtx.createOscillator();
-            let gain = audioCtx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.08);
+            try {
+                let osc = audioCtx.createOscillator();
+                let gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.07);
+            } catch (e) {}
         }
 
-        // *** 2. ระบบวาดกราฟ ECG Sweep ***
+        // *** 2. ระบบวาดกราฟ ECG ที่ผันแปรตาม BPM จริง ***
         const canvas = document.getElementById('ecgCanvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = canvas.offsetWidth;
-        canvas.height = canvas.offsetHeight;
-        let x = 0, lastY = canvas.height / 2;
+        
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        let x = 0;
+        let lastY = canvas.height / 2;
+        let lastBeatTime = Date.now();
 
         function drawECG() {
             const centerY = canvas.height / 2;
-            let y = centerY + (Math.sin(x * 0.05) * 5) + (Math.random() * 4 - 2);
+            const now = Date.now();
+            
+            // คำนวณช่วงห่างระหว่างการเต้นแต่ละครั้ง (มิลลิวินาที) ตามค่า BPM จริง
+            const beatInterval = (60 / currentBPM) * 1000; 
+            
+            let y = centerY + (Math.sin(x * 0.08) * 3) + (Math.random() * 3 - 1.5);
 
-            // จำลองจังหวะการเต้นของกราฟ ECG ให้สัมพันธ์กับเวลา
-            if (Math.floor(x) % 120 === 0) {
-                y = centerY - 70;
-                playBeep(); // ส่งเสียงปี๊บตามจังหวะ
+            // เมื่อครบรอบการเต้นตาม BPM จริง
+            if (now - lastBeatTime >= beatInterval) {
+                y = centerY - (canvas.height * 0.35); // วาดจุดพีค QRS Complex
+                playBeep(); // ส่งเสียงปี๊บ
+                
+                // เอฟเฟกต์หัวใจเต้น
+                const heart = document.getElementById('heart');
+                if (heart) {
+                    heart.classList.add('pulse');
+                    setTimeout(() => heart.classList.remove('pulse'), 150);
+                }
+
+                lastBeatTime = now;
             }
 
             ctx.strokeStyle = '#00ff00';
@@ -155,13 +206,57 @@
             ctx.moveTo(x, lastY);
             ctx.lineTo(x + 2, y);
             ctx.stroke();
-            ctx.clearRect(x + 3, 0, 12, canvas.height);
+
+            // ลบเส้นเก่าด้านหน้าเพื่อทำเอฟเฟกต์ Radar Sweep
+            ctx.clearRect(x + 3, 0, 15, canvas.height);
+
             lastY = y;
-            x += 2;
+            x += 2.2;
             if (x > canvas.width) x = 0;
+
             requestAnimationFrame(drawECG);
         }
         drawECG();
+
+        // *** 3. ดึงค่า BPM จริงจาก Pulsoid API โดยตรง ***
+        async function fetchPulsoidData() {
+            try {
+                // ดึงตรงผ่าน Pulsoid API (รันบน GitHub Pages HTTPS จะไม่ติด CORS)
+                const res = await fetch(`https://ramen.pulsoid.net/v1/live/${WIDGET_ID}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.bpm) {
+                        currentBPM = data.bpm;
+                        document.getElementById('hrValue').innerText = data.bpm;
+                        document.getElementById('syncStatus').innerText = '● LIVE SYNC';
+                        document.getElementById('syncStatus').style.color = '#00ff00';
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.log("Direct API fetch failed, trying proxy...", e);
+            }
+
+            // Proxy สำรองกรณีเบราว์เซอร์บล็อก
+            try {
+                const proxyRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://ramen.pulsoid.net/v1/live/' + WIDGET_ID)}`);
+                const proxyJson = await proxyRes.json();
+                const data = JSON.parse(proxyJson.contents);
+                if (data && data.bpm) {
+                    currentBPM = data.bpm;
+                    document.getElementById('hrValue').innerText = data.bpm;
+                    document.getElementById('syncStatus').innerText = '● LIVE (PROXY)';
+                    document.getElementById('syncStatus').style.color = '#00ff00';
+                }
+            } catch (err) {
+                document.getElementById('syncStatus').innerText = '● OFFLINE';
+                document.getElementById('syncStatus').style.color = '#ff3333';
+            }
+        }
+
+        // เช็กค่า BPM ใหม่ทุกๆ 1 วินาที
+        setInterval(fetchPulsoidData, 1000);
+        fetchPulsoidData();
     </script>
 </body>
 </html>
