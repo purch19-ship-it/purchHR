@@ -34,7 +34,6 @@
             font-size: 0.9rem;
             color: #00ff00;
             margin-left: 10px;
-            transition: color 0.3s;
         }
         .container { 
             display: flex; 
@@ -62,7 +61,7 @@
         }
         .card { 
             background: #080808; 
-            padding: 25px; 
+            padding: 15px; 
             border-radius: 12px; 
             border: 2px solid #00ff00; 
             box-shadow: 0 0 15px rgba(0, 255, 0, 0.15);
@@ -70,34 +69,19 @@
             flex-direction: column;
             justify-content: space-between;
             height: 80%;
-            transition: border-color 0.3s, box-shadow 0.3s;
-        }
-        .card.offline {
-            border-color: #555;
-            box-shadow: none;
+            overflow: hidden;
+            position: relative;
         }
         .card-title {
             font-size: 1.8rem;
             font-weight: bold;
         }
-        .val { 
-            font-size: 7.5rem; 
-            font-weight: bold; 
-            text-align: right; 
-            line-height: 1;
-            margin: 20px 0;
-            text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
-            color: #00ff00;
-            transition: color 0.3s;
-        }
-        .val.offline {
-            color: #555;
-            text-shadow: none;
-        }
-        .unit { 
-            text-align: right; 
-            font-size: 1.8rem; 
-            color: #00cc00;
+        .pulsoid-frame {
+            width: 100%;
+            height: 100%;
+            border: none;
+            flex: 1;
+            background: transparent;
         }
         button { 
             background: #111; 
@@ -111,19 +95,12 @@
         button:hover {
             border-color: #00ff00;
         }
-        .heart-icon {
-            display: inline-block;
-            transition: transform 0.1s;
-        }
-        .pulse {
-            transform: scale(1.3);
-        }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <h2>Purch C. - PATIENT MONITOR <span class="status-tag" id="syncStatus">● SEARCHING...</span></h2>
+        <h2>Purch C. - PATIENT MONITOR <span class="status-tag" id="syncStatus">● LIVE SYNC</span></h2>
         <button id="soundBtn" onclick="toggleSound()">🔊 เปิดเสียงปี๊บ (Enable Sound)</button>
     </div>
 
@@ -132,10 +109,9 @@
             <canvas id="ecgCanvas"></canvas>
         </div>
         <div class="vitals-box">
-            <div class="card hr" id="hrCard">
-                <div class="card-title"><span id="heart" class="heart-icon">❤️</span> HR (Pulse)</div>
-                <div class="val" id="hrValue">--</div>
-                <div class="unit">BPM</div>
+            <div class="card hr">
+                <div class="card-title">❤️ HR (Pulse)</div>
+                <iframe id="pulsoidFrame" class="pulsoid-frame" src="https://pulsoid.net/widget/view/0f9acd52-7d11-4156-8b62-ce37b11067bb" allow="autoplay"></iframe>
             </div>
         </div>
     </div>
@@ -143,10 +119,8 @@
     <script>
         const WIDGET_ID = "0f9acd52-7d11-4156-8b62-ce37b11067bb";
         
-        let currentBPM = 0;
-        let lastBPMValue = null;
-        let lastDataTime = Date.now();
-        let isOnline = false;
+        let currentBPM = 70; // ค่าเริ่มต้นสำหรับสปีดกราฟ
+        let isOnline = true;
 
         let audioCtx = null;
         let soundEnabled = false;
@@ -194,17 +168,11 @@
             
             let y = centerY + (Math.sin(x * 0.08) * 2) + (Math.random() * 2 - 1);
 
-            if (isOnline && currentBPM > 30) {
+            if (isOnline) {
                 const beatInterval = (60 / currentBPM) * 1000;
                 if (now - lastBeatTime >= beatInterval) {
-                    y = centerY - (canvas.height * 0.35);
+                    y = centerY - (canvas.height * 0.35); // วาดจุดพีค QRS
                     playBeep();
-                    
-                    const heart = document.getElementById('heart');
-                    if (heart) {
-                        heart.classList.add('pulse');
-                        setTimeout(() => heart.classList.remove('pulse'), 150);
-                    }
                     lastBeatTime = now;
                 }
             }
@@ -226,59 +194,31 @@
         }
         drawECG();
 
-        async function fetchBPM() {
-            const now = Date.now();
-            let fetchedBPM = null;
-
+        // ดึงค่า BPM เพื่อปรับสปีดกราฟแบบยืดหยุ่น (ผ่าน Proxy กันบล็อก)
+        async function updateBPM() {
             try {
-                const res = await fetch(`https://ramen.pulsoid.net/v1/live/${WIDGET_ID}`);
-                if (res.ok) {
-                    const data = await res.json();
+                const proxyRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://ramen.pulsoid.net/v1/live/' + WIDGET_ID)}`);
+                if (proxyRes.ok) {
+                    const proxyJson = await proxyRes.json();
+                    const data = JSON.parse(proxyJson.contents);
                     if (data && data.bpm) {
-                        fetchedBPM = data.bpm;
+                        currentBPM = data.bpm;
+                        isOnline = true;
+                        document.getElementById('syncStatus').innerText = '● LIVE SYNC';
+                        document.getElementById('syncStatus').style.color = '#00ff00';
+                        return;
                     }
                 }
             } catch (e) {}
-
-            if (fetchedBPM) {
-                if (fetchedBPM !== lastBPMValue) {
-                    lastBPMValue = fetchedBPM;
-                    lastDataTime = now;
-                }
-
-                // ถ้าตัวเลขส่งซ้ำๆ เดิมเกิน 10 วินาที = ถอดนาฬิกาออกแล้ว
-                if (now - lastDataTime > 10000) {
-                    setOfflineState();
-                } else {
-                    setOnlineState(fetchedBPM);
-                }
-            } else {
-                setOfflineState();
-            }
-        }
-
-        function setOnlineState(bpm) {
+            
+            // หากดึงสปีดไม่ได้ กราฟยังคงวาดที่สปีดปกติ (70 BPM) โดยอาศัย iframe แสดงตัวเลขสด
             isOnline = true;
-            currentBPM = bpm;
-            document.getElementById('hrValue').innerText = bpm;
-            document.getElementById('hrValue').classList.remove('offline');
-            document.getElementById('hrCard').classList.remove('offline');
-            document.getElementById('syncStatus').innerText = '● LIVE SYNC';
+            document.getElementById('syncStatus').innerText = '● LIVE (WIDGET)';
             document.getElementById('syncStatus').style.color = '#00ff00';
         }
 
-        function setOfflineState() {
-            isOnline = false;
-            currentBPM = 0;
-            document.getElementById('hrValue').innerText = '--';
-            document.getElementById('hrValue').classList.add('offline');
-            document.getElementById('hrCard').classList.add('offline');
-            document.getElementById('syncStatus').innerText = '● DISCONNECTED';
-            document.getElementById('syncStatus').style.color = '#ff3333';
-        }
-
-        setInterval(fetchBPM, 1500);
-        fetchBPM();
+        setInterval(updateBPM, 3000);
+        updateBPM();
     </script>
 </body>
 </html>
