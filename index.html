@@ -1,11 +1,35 @@
-// เปลี่ยน URL ตรงนี้เป็น Worker ของคุณ
-const proxyUrl = 'https://pulsoid-proxy-v2.purch19.workers.dev/';
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>Purch HR Monitor</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; margin-top: 50px; background: #111; color: #fff; }
+        #hr-display { font-size: 80px; font-weight: bold; color: #ff3366; }
+    </style>
+</head>
+<body>
+    <h1>Heart Rate Monitor</h1>
+    <div id="hr-display">--</div>
+    <p>BPM</p>
 
-fetch(proxyUrl)
-  .then(res => res.json())
-  .then(data => {
-    const hr = data.data.heart_rate;
-    console.log("Heart Rate:", hr);
-    // โค้ดสำหรับอัปเดตหน้าจอและเสียงปี๊บของคุณต่อตรงนี้
-  })
-  .catch(err => console.error("Error fetching HR:", err));
+    <script>
+        const proxyUrl = 'https://pulsoid-proxy-v2.purch19.workers.dev/';
+
+        function updateHR() {
+            fetch(proxyUrl)
+                .then(res => res.json())
+                .then(data => {
+                    const hr = data.data.heart_rate;
+                    document.getElementById('hr-display').innerText = hr;
+                    console.log("Heart Rate:", hr);
+                })
+                .catch(err => console.error("Error fetching HR:", err));
+        }
+
+        // อัปเดตทุกๆ 5 วินาที
+        setInterval(updateHR, 5000);
+        updateHR();
+    </script>
+</body>
+</html>
