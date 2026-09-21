@@ -62,7 +62,7 @@
         }
         .card { 
             background: #080808; 
-            padding: 25px; 
+            padding: 15px; 
             border-radius: 12px; 
             border: 2px solid #00ff00; 
             box-shadow: 0 0 15px rgba(0, 255, 0, 0.15);
@@ -70,6 +70,8 @@
             flex-direction: column;
             justify-content: space-between;
             height: 80%;
+            overflow: hidden;
+            position: relative;
             transition: border-color 0.3s, box-shadow 0.3s;
         }
         .card.offline {
@@ -80,19 +82,28 @@
             font-size: 1.8rem;
             font-weight: bold;
         }
-        .val { 
-            font-size: 7.5rem; 
-            font-weight: bold; 
-            text-align: right; 
+        .pulsoid-frame {
+            width: 100%;
+            height: 100%;
+            border: none;
+            flex: 1;
+            background: transparent;
+            display: block;
+        }
+        .pulsoid-frame.hidden {
+            display: none;
+        }
+        .val-offline {
+            font-size: 7.5rem;
+            font-weight: bold;
+            text-align: right;
             line-height: 1;
             margin: 20px 0;
-            text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
-            color: #00ff00;
-            transition: color 0.3s;
-        }
-        .val.offline {
             color: #444;
-            text-shadow: none;
+            display: none;
+        }
+        .val-offline.show {
+            display: block;
         }
         .unit { 
             text-align: right; 
@@ -134,7 +145,8 @@
         <div class="vitals-box">
             <div class="card hr" id="hrCard">
                 <div class="card-title"><span id="heart" class="heart-icon">❤️</span> HR (Pulse)</div>
-                <div class="val" id="hrValue">--</div>
+                <iframe id="pulsoidFrame" class="pulsoid-frame" src="https://pulsoid.net/widget/view/0f9acd52-7d11-4156-8b62-ce37b11067bb" allow="autoplay"></iframe>
+                <div class="val-offline" id="offlineVal">--</div>
                 <div class="unit">BPM</div>
             </div>
         </div>
@@ -143,9 +155,9 @@
     <script>
         const WIDGET_ID = "0f9acd52-7d11-4156-8b62-ce37b11067bb";
         
-        let currentBPM = 0;
+        let currentBPM = 72;
         let lastBPMValue = null;
-        let lastDataTime = Date.now();
+        let lastBPMChangeTime = Date.now();
         let isOnline = false;
 
         let audioCtx = null;
@@ -226,62 +238,71 @@
         }
         drawECG();
 
-        async function fetchPulsoid() {
+        // ระบบดึงข้อมูลแบบสลับ Proxy อัตโนมัติ (Multi-Proxy Failover)
+        async function fetchBPM() {
             const now = Date.now();
             let bpm = null;
 
-            // ดึงผ่าน Proxy เพื่อทะลุการบล็อก CORS บน Chrome
+            // วิธีที่ 1: ดึงตรงจาก Pulsoid API
             try {
-                const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://ramen.pulsoid.net/v1/live/' + WIDGET_ID)}&timestamp=${now}`);
+                const res = await fetch(`https://ramen.pulsoid.net/v1/live/${WIDGET_ID}`);
                 if (res.ok) {
-                    const proxyData = await res.json();
-                    const data = JSON.parse(proxyData.contents);
-                    if (data && data.bpm) {
-                        bpm = data.bpm;
-                    }
+                    const data = await res.json();
+                    if (data && data.bpm) bpm = data.bpm;
                 }
             } catch (e) {}
 
+            // วิธีที่ 2: ใช้ Corsproxy.io
+            if (!bpm) {
+                try {
+                    const res = await fetch(`https://corsproxy.io/?${encodeURIComponent('https://ramen.pulsoid.net/v1/live/' + WIDGET_ID)}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data && data.bpm) bpm = data.bpm;
+                    }
+                } catch (e) {}
+            }
+
+            // วิธีที่ 3: ใช้ Allorigins
+            if (!bpm) {
+                try {
+                    const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://ramen.pulsoid.net/v1/live/' + WIDGET_ID)}`);
+                    if (res.ok) {
+                        const proxyData = await res.json();
+                        const data = JSON.parse(proxyData.contents);
+                        if (data && data.bpm) bpm = data.bpm;
+                    }
+                } catch (e) {}
+            }
+
             if (bpm) {
-                // เช็กว่าข้อมูลมีการอัปเดตใหม่ไหม
                 if (bpm !== lastBPMValue) {
                     lastBPMValue = bpm;
-                    lastDataTime = now;
+                    lastBPMChangeTime = now;
                 }
 
-                // ถ้าตัวเลขค้างซ้ำเดิมเกิน 10 วินาที = ปิดแอป/ถอดนาฬิกา
-                if (now - lastDataTime > 10000) {
+                // ถ้าตัวเลขค้างซ้ำเดิมเกิน 12 วินาที = ปิดแอป/ถอดนาฬิกา
+                if (now - lastBPMChangeTime > 12000) {
                     setOffline();
                 } else {
                     setOnline(bpm);
                 }
             } else {
-                setOffline();
+                // หาก Proxy บล็อก ให้รันผ่าน iframe widget แสดงตัวเลขแทน
+                setWidgetFallback();
             }
         }
 
         function setOnline(bpm) {
             isOnline = true;
             currentBPM = bpm;
-            document.getElementById('hrValue').innerText = bpm;
-            document.getElementById('hrValue').classList.remove('offline');
+            document.getElementById('pulsoidFrame').classList.remove('hidden');
+            document.getElementById('offlineVal').classList.remove('show');
             document.getElementById('hrCard').classList.remove('offline');
             document.getElementById('syncStatus').innerText = '● LIVE SYNC';
             document.getElementById('syncStatus').style.color = '#00ff00';
         }
 
-        function setOffline() {
-            isOnline = false;
-            currentBPM = 0;
-            document.getElementById('hrValue').innerText = '--';
-            document.getElementById('hrValue').classList.add('offline');
-            document.getElementById('hrCard').classList.add('offline');
-            document.getElementById('syncStatus').innerText = '● DISCONNECTED';
-            document.getElementById('syncStatus').style.color = '#ff3333';
-        }
-
-        setInterval(fetchPulsoid, 2000);
-        fetchPulsoid();
-    </script>
-</body>
-</html>
+        function setWidgetFallback() {
+            isOnline = true;
+            docu
