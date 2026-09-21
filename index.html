@@ -123,7 +123,7 @@
 <body>
 
     <div class="header">
-        <h2>Purch C. - MONITOR <span class="status-tag" id="syncStatus">● LIVE SYNC</span></h2>
+        <h2>Purch C. - PATIENT MONITOR <span class="status-tag" id="syncStatus">● SEARCHING...</span></h2>
         <button id="soundBtn" onclick="toggleSound()">🔊 เปิดเสียงปี๊บ (Enable Sound)</button>
     </div>
 
@@ -143,15 +143,14 @@
     <script>
         const WIDGET_ID = "0f9acd52-7d11-4156-8b62-ce37b11067bb";
         
-        let currentBPM = 0; // 0 = Offline / Flatline
+        let currentBPM = 0;
         let lastBPMValue = null;
-        let lastBPMChangeTime = Date.now();
+        let lastDataTime = Date.now();
         let isOnline = false;
 
         let audioCtx = null;
         let soundEnabled = false;
 
-        // *** 1. ระบบเสียง Beep ***
         function toggleSound() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             soundEnabled = !soundEnabled;
@@ -175,7 +174,6 @@
             } catch (e) {}
         }
 
-        // *** 2. ระบบวาดกราฟ ECG (เต้นตาม BPM หรือ Flatline เมื่อ Offline) ***
         const canvas = document.getElementById('ecgCanvas');
         const ctx = canvas.getContext('2d');
         
@@ -194,12 +192,12 @@
             const centerY = canvas.height / 2;
             const now = Date.now();
             
-            let y = centerY + (Math.sin(x * 0.08) * 2) + (Math.random() * 2 - 1); // Baseline Noise
+            let y = centerY + (Math.sin(x * 0.08) * 2) + (Math.random() * 2 - 1);
 
             if (isOnline && currentBPM > 30) {
                 const beatInterval = (60 / currentBPM) * 1000;
                 if (now - lastBeatTime >= beatInterval) {
-                    y = centerY - (canvas.height * 0.35); // วาดลูกคลื่น QRS
+                    y = centerY - (canvas.height * 0.35);
                     playBeep();
                     
                     const heart = document.getElementById('heart');
@@ -211,7 +209,7 @@
                 }
             }
 
-            ctx.strokeStyle = isOnline ? '#00ff00' : '#555555';
+            ctx.strokeStyle = isOnline ? '#00ff00' : '#444444';
             ctx.lineWidth = 2.5;
             ctx.beginPath();
             ctx.moveTo(x, lastY);
@@ -228,34 +226,35 @@
         }
         drawECG();
 
-        // *** 3. ระบบดึงค่า Pulsoid พร้อมตรวจสอบสัญญาณ Timeout (10 วินาที) ***
         async function fetchBPM() {
+            const now = Date.now();
+            let fetchedBPM = null;
+
             try {
                 const res = await fetch(`https://ramen.pulsoid.net/v1/live/${WIDGET_ID}`);
                 if (res.ok) {
                     const data = await res.json();
                     if (data && data.bpm) {
-                        const newBPM = data.bpm;
-                        const now = Date.now();
-
-                        // เช็กว่าตัวเลขมีการเปลี่ยนค่าไหม
-                        if (newBPM !== lastBPMValue) {
-                            lastBPMValue = newBPM;
-                            lastBPMChangeTime = now; // รีเซ็ตเวลาอัปเดตล่าสุด
-                        }
-
-                        // ถ้าตัวเลขค้างเดิมเกิน 10 วินาที ให้ถือว่าถอดนาฬิกา / สัญญาณขาด
-                        if (now - lastBPMChangeTime > 10000) {
-                            setOfflineState();
-                        } else {
-                            setOnlineState(newBPM);
-                        }
-                        return;
+                        fetchedBPM = data.bpm;
                     }
                 }
             } catch (e) {}
 
-            setOfflineState();
+            if (fetchedBPM) {
+                if (fetchedBPM !== lastBPMValue) {
+                    lastBPMValue = fetchedBPM;
+                    lastDataTime = now;
+                }
+
+                // ถ้าตัวเลขส่งซ้ำๆ เดิมเกิน 10 วินาที = ถอดนาฬิกาออกแล้ว
+                if (now - lastDataTime > 10000) {
+                    setOfflineState();
+                } else {
+                    setOnlineState(fetchedBPM);
+                }
+            } else {
+                setOfflineState();
+            }
         }
 
         function setOnlineState(bpm) {
@@ -278,7 +277,7 @@
             document.getElementById('syncStatus').style.color = '#ff3333';
         }
 
-        setInterval(fetchBPM, 2000);
+        setInterval(fetchBPM, 1500);
         fetchBPM();
     </script>
 </body>
